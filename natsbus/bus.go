@@ -47,8 +47,9 @@ func (bus *NatsBus) Unsubscribe(topic string, handler interface{}) error {
 	bus.lock.Lock()
 	defer bus.lock.Unlock()
 	if _, ok := bus.handlers[topic]; ok && len(bus.handlers[topic]) > 0 {
-		if o := bus.removeHandler(topic, bus.findHandlerIdx(topic, reflect.ValueOf(handler))); o != nil && o.sub != nil {
-			o.sub.Unsubscribe() // 取消订阅
+		if o := bus.removeHandler(topic, bus.findHandlerIdx(topic, reflect.ValueOf(handler))); //
+		o != nil && o.sub != nil && o.sub.IsValid() {
+			o.sub.Unsubscribe() // 订阅当前有效， 取消订阅
 		}
 		return nil
 	}
@@ -183,8 +184,10 @@ func (bus *NatsBus) SubscribeOnceAsync(topic string, fn interface{}) error {
 
 // Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
 func (bus *NatsBus) Publish(topic string, args interface{}) error {
-	if data, err := FmtData2Byte(args); err != nil {
-		return err
+	if bus.nc == nil && bus.nc.Status() != nats.CONNECTED { // 检查连接
+		return fmt.Errorf("nats connection is nil or in invalid state")
+	} else if data, err := FmtData2Byte(args); err != nil {
+		return err // 数据无法序列化
 	} else {
 		return bus.nc.Publish(topic, data)
 	}
@@ -192,8 +195,10 @@ func (bus *NatsBus) Publish(topic string, args interface{}) error {
 
 // Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
 func (bus *NatsBus) Request(topic string, timeout time.Duration, args interface{}, result interface{}) error {
-	if data, err := FmtData2Byte(args); err != nil {
-		return err // 删除无法序列化
+	if bus.nc == nil || bus.nc.Status() != nats.CONNECTED { // 检查连接
+		return fmt.Errorf("nats connection is nil or in invalid state")
+	} else if data, err := FmtData2Byte(args); err != nil {
+		return err // 数据无法序列化
 	} else if msg, err := bus.nc.Request(topic, data, timeout); err != nil {
 		return err // 推送内容发生异常
 	} else if err := json.Unmarshal(msg.Data, result); err != nil {
@@ -203,7 +208,9 @@ func (bus *NatsBus) Request(topic string, timeout time.Duration, args interface{
 }
 
 func (bus *NatsBus) RequestB(topic string, timeout time.Duration, args interface{}) ([]byte, error) {
-	if data, err := FmtData2Byte(args); err != nil {
+	if bus.nc == nil && bus.nc.Status() != nats.CONNECTED { // 检查连接
+		return nil, fmt.Errorf("nats connection is nil or in invalid state")
+	} else if data, err := FmtData2Byte(args); err != nil {
 		return nil, err
 	} else if msg, err := bus.nc.Request(topic, data, timeout); err != nil {
 		return nil, err

@@ -89,10 +89,10 @@ func TestBus2(t *testing.T) {
 		Name: "hello",
 	}
 
-	bus.Request("test_bus", 2*time.Second, msg, msg)
+	err := bus.Request("test_bus", time.Second, msg, msg)
 
 	str, _ := json.Marshal(msg)
-	fmt.Println(string(str))
+	fmt.Println(string(str), err)
 	assert.NotNil(t, nil)
 }
 
