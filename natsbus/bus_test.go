@@ -7,7 +7,7 @@ import (
 	"time"
 
 	gnatsd "github.com/nats-io/gnatsd/test"
-	"github.com/nats-io/go-nats"
+	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/suisrc/gobus"
 	"github.com/suisrc/gobus/natsbus"
