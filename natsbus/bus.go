@@ -46,19 +46,22 @@ func New(nc *nats.Conn) gobus.Bus {
 // Unsubscribe removes callback defined for a topic.
 // Returns error if there are no callbacks subscribed to the topic.
 func (bus *NatsBus) Unsubscribe(topic string, handler interface{}) error {
+	return bus.unsubscribe(topic, reflect.ValueOf(handler))
+}
+
+//=================================================================================================
+
+func (bus *NatsBus) unsubscribe(topic string, hdl reflect.Value) error {
 	bus.lock.Lock()
 	defer bus.lock.Unlock()
 	if _, ok := bus.handlers[topic]; ok && len(bus.handlers[topic]) > 0 {
-		if o := bus.removeHandler(topic, bus.findHandlerIdx(topic, reflect.ValueOf(handler))); //
-		o != nil && o.sub != nil && o.sub.IsValid() {
+		if o := bus.removeHandler(topic, bus.findHandlerIdx(topic, hdl)); o != nil && o.sub != nil && o.sub.IsValid() {
 			o.sub.Unsubscribe() // 订阅当前有效， 取消订阅
 		}
 		return nil
 	}
 	return fmt.Errorf("topic %s doesn't exist", topic)
 }
-
-//=================================================================================================
 
 func (bus *NatsBus) removeHandler(topic string, idx int) *busHandler {
 	if _, ok := bus.handlers[topic]; !ok {
@@ -149,7 +152,7 @@ func (bus *NatsBus) doHook(hdl *busHandler, msg *nats.Msg) {
 		}
 	}
 	if hdl.flagOnce { // 注销订阅
-		bus.Unsubscribe(hdl.topic, hdl.call.Interface())
+		bus.unsubscribe(hdl.topic, hdl.call)
 	}
 }
 
