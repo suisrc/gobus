@@ -95,6 +95,56 @@ func (bus *NatsBus) findHandlerIdx(topic string, callback reflect.Value) int {
 //=================================================================================================
 //=================================================================================================
 
+// func (?) (result, (error))
+func (bus *NatsBus) Subscribe(topic string, fn interface{}) error {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn)}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// func (?)
+func (bus *NatsBus) SubscribeAsync(topic string, fn interface{}) error {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), async: true}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// func (?) (result, (error))
+func (bus *NatsBus) SubscribeOnce(topic string, fn interface{}) error {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), flagOnce: true}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// func (?)
+func (bus *NatsBus) SubscribeOnceAsync(topic string, fn interface{}) error {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), async: true, flagOnce: true}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// func (?) (result, (error))
+func (bus *NatsBus) SubscribeByGroup(topic, group string, fn interface{}) error {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), group: group}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// func (?)
+func (bus *NatsBus) SubscribeAsyncByGroup(topic, group string, fn interface{}) error {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), group: group, async: true}); err != nil {
+		return err
+	}
+	return nil
+}
+
+//=================================================================================================
+
 // doSubscribe handles the subscription logic and is utilized by the public Subscribe functions
 func (bus *NatsBus) doSubscribe(hdl *busHandler) error {
 	bus.lock.Lock()
@@ -154,56 +204,6 @@ func (bus *NatsBus) doHook(hdl *busHandler, msg *nats.Msg) {
 	if hdl.flagOnce { // 注销订阅
 		bus.unsubscribe(hdl.topic, hdl.call)
 	}
-}
-
-//=================================================================================================
-
-// func (?) (result, (error))
-func (bus *NatsBus) Subscribe(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn)}); err != nil {
-		return err
-	}
-	return nil
-}
-
-// func (?)
-func (bus *NatsBus) SubscribeAsync(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), async: true}); err != nil {
-		return err
-	}
-	return nil
-}
-
-// func (?) (result, (error))
-func (bus *NatsBus) SubscribeOnce(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), flagOnce: true}); err != nil {
-		return err
-	}
-	return nil
-}
-
-// func (?)
-func (bus *NatsBus) SubscribeOnceAsync(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), async: true, flagOnce: true}); err != nil {
-		return err
-	}
-	return nil
-}
-
-// func (?) (result, (error))
-func (bus *NatsBus) SubscribeByGroup(topic, group string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), group: group}); err != nil {
-		return err
-	}
-	return nil
-}
-
-// func (?)
-func (bus *NatsBus) SubscribeAsyncByGroup(topic, group string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), group: group, async: true}); err != nil {
-		return err
-	}
-	return nil
 }
 
 //=================================================================================================
