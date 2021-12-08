@@ -21,6 +21,8 @@ type NatsBus struct {
 type busHandler struct {
 	call     reflect.Value
 	sub      *nats.Subscription
+	topic    string
+	group    string
 	async    bool
 	flagOnce bool
 }
@@ -91,24 +93,31 @@ func (bus *NatsBus) findHandlerIdx(topic string, callback reflect.Value) int {
 //=================================================================================================
 
 // doSubscribe handles the subscription logic and is utilized by the public Subscribe functions
-func (bus *NatsBus) doSubscribe(topic string, fn interface{}, hdl *busHandler) error {
+func (bus *NatsBus) doSubscribe(hdl *busHandler) error {
 	bus.lock.Lock()
 	defer bus.lock.Unlock()
-	if !(reflect.TypeOf(fn).Kind() == reflect.Func) {
-		return fmt.Errorf("%s is not of type reflect.Func", reflect.TypeOf(fn).Kind())
+	if !(reflect.TypeOf(hdl.call.Interface()).Kind() == reflect.Func) {
+		return fmt.Errorf("%s is not of type reflect.Func", reflect.TypeOf(hdl.call.Interface()).Kind())
 	}
-	if sub, err := bus.nc.Subscribe(topic, func(msg *nats.Msg) {
-		bus.doHook(topic, hdl, msg)
+	subfunc := func(cb nats.MsgHandler) (*nats.Subscription, error) {
+		if hdl.group == "" {
+			return bus.nc.Subscribe(hdl.topic, cb)
+		} else {
+			return bus.nc.QueueSubscribe(hdl.topic, hdl.group, cb) // 分组
+		}
+	}
+	if sub, err := subfunc(func(msg *nats.Msg) {
+		bus.doHook(hdl, msg)
 	}); err != nil {
 		return err
 	} else {
 		hdl.sub = sub
 	}
-	bus.handlers[topic] = append(bus.handlers[topic], hdl)
+	bus.handlers[hdl.topic] = append(bus.handlers[hdl.topic], hdl)
 	return nil
 }
 
-func (bus *NatsBus) doHook(topic string, hdl *busHandler, msg *nats.Msg) {
+func (bus *NatsBus) doHook(hdl *busHandler, msg *nats.Msg) {
 	tt := hdl.call.Type()
 	cn := tt.NumIn()
 	in := []reflect.Value{}
@@ -140,7 +149,7 @@ func (bus *NatsBus) doHook(topic string, hdl *busHandler, msg *nats.Msg) {
 		}
 	}
 	if hdl.flagOnce { // 注销订阅
-		bus.Unsubscribe(topic, hdl.call)
+		bus.Unsubscribe(hdl.topic, hdl.call.Interface())
 	}
 }
 
@@ -148,7 +157,7 @@ func (bus *NatsBus) doHook(topic string, hdl *busHandler, msg *nats.Msg) {
 
 // func (?) (result, (error))
 func (bus *NatsBus) Subscribe(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(topic, fn, &busHandler{call: reflect.ValueOf(fn)}); err != nil {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn)}); err != nil {
 		return err
 	}
 	return nil
@@ -156,7 +165,7 @@ func (bus *NatsBus) Subscribe(topic string, fn interface{}) error {
 
 // func (?)
 func (bus *NatsBus) SubscribeAsync(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(topic, fn, &busHandler{call: reflect.ValueOf(fn), async: true}); err != nil {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), async: true}); err != nil {
 		return err
 	}
 	return nil
@@ -164,7 +173,7 @@ func (bus *NatsBus) SubscribeAsync(topic string, fn interface{}) error {
 
 // func (?) (result, (error))
 func (bus *NatsBus) SubscribeOnce(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(topic, fn, &busHandler{call: reflect.ValueOf(fn), flagOnce: true}); err != nil {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), flagOnce: true}); err != nil {
 		return err
 	}
 	return nil
@@ -172,7 +181,23 @@ func (bus *NatsBus) SubscribeOnce(topic string, fn interface{}) error {
 
 // func (?)
 func (bus *NatsBus) SubscribeOnceAsync(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(topic, fn, &busHandler{call: reflect.ValueOf(fn), async: true, flagOnce: true}); err != nil {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), async: true, flagOnce: true}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// func (?) (result, (error))
+func (bus *NatsBus) SubscribeByGroup(topic, group string, fn interface{}) error {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), group: group}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// func (?)
+func (bus *NatsBus) SubscribeAsyncByGroup(topic, group string, fn interface{}) error {
+	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), group: group, async: true}); err != nil {
 		return err
 	}
 	return nil
