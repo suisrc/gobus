@@ -1,6 +1,7 @@
 package gobus
 
 import (
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -12,20 +13,22 @@ type Kind int
 const (
 	BusSync      Kind = iota // value -> 0
 	BusAsync                 // value -> 1
-	BusOnceSync              // value -> 2
-	BusOnceAsync             // value -> 3
+	BusOnceSync              // value -> 2, 不支持group
+	BusOnceAsync             // value -> 3, 不支持group
 )
 
 type EventSubscriber interface {
 	Subscribe(Bus) (func(), error)
 }
 
+//=======================================================================================
+
 type EventHandler interface {
 	Subscribe() (kind Kind, topic string, handler interface{})
 }
 
 /**
- *
+ * 订阅模式
  * bus: 总线
  * hdl: 订阅的内容
  */
@@ -52,6 +55,36 @@ func Subscribe(bus Bus, hdl EventHandler) (func(), error) {
 	return func() { bus.Unsubscribe(topic, handler) }, nil
 }
 
+//=======================================================================================
+
+type EventHandlerByGroup interface {
+	Subscribe() (kind Kind, topic, group string, handler interface{})
+}
+
+/**
+ * 队列模式
+ * bus: 总线
+ * hdl: 订阅的内容
+ */
+func SubscribeByGroup(bus Bus, hdl EventHandlerByGroup) (func(), error) {
+	kind, topic, group, handler := hdl.Subscribe()
+	switch kind {
+	case BusSync:
+		if err := bus.SubscribeByGroup(topic, group, handler); err != nil {
+			return nil, err
+		}
+	case BusAsync:
+		if err := bus.SubscribeAsyncByGroup(topic, group, handler); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("group is no suppert type: %v", kind)
+	}
+	return func() { bus.Unsubscribe(topic, handler) }, nil
+}
+
+//=======================================================================================
+
 /**
  *
  * bus: 总线
@@ -74,6 +107,8 @@ func SubscribeBatch(bus Bus, data interface{}, verify bool, excludes ...string) 
 		switch value := val.Field(k).Interface().(type) {
 		case EventHandler:
 			cls, err = Subscribe(bus, value)
+		case EventHandlerByGroup:
+			cls, err = SubscribeByGroup(bus, value)
 		case EventSubscriber:
 			cls, err = value.Subscribe(bus)
 		}
