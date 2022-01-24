@@ -67,9 +67,10 @@ func SubscribeTag(bus Bus, data interface{}, verify bool, tag string) (func(), e
 			}
 			topic := ""
 			if all { // 全部方法都需要订阅
-				topic = "$" + strings.ToLower(name)
+				topic = strings.ToLower(name)
 				if len(tag) > 1 { // 默认主题
-					topic += fmt.Sprintf("%s%s#%s", tag[:1], topic[1:], topic[1:])
+					// $method#method ?tag-method
+					topic = fmt.Sprintf("$%s#%s%s%s", topic, topic, tag[1:], topic)
 				}
 			} else if conf == "" || conf[0] != '$' {
 				topic = conf
