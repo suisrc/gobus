@@ -50,7 +50,7 @@ func GetTopicName(topic string) (string, error) {
 		return "", nil
 	}
 	if topic[0] == '$' {
-		keys := strings.SplitN(topic[1:], ",", 2)
+		keys := strings.SplitN(topic[1:], "?", 2)
 		topic = ""
 		if keys[0] != "" {
 			topic = Topics[keys[0]]

@@ -16,6 +16,8 @@ import (
 // topic => topicA#groupA>>topicB;, 从主题A订阅转发到主题B, 异步订阅专用
 // Once订阅只支持无分组订阅, 同步订阅不支持转发
 //
+// $[默认方法名]?[默认配置内容],...
+//
 // 1.没有返回值， 异步订阅
 // 2.有返回值，并且订阅包含=>异步订阅
 // 3.否则同步订阅
@@ -23,8 +25,8 @@ import (
 // 5.标签注入默认场景下全部是异步订阅，以防止未配置导致外部总线的破坏
 type Inject struct {
 	Bus      gobus.Bus
-	SubDemo  SubDemo  `gbus:"Exec1"` // Exec1=$,test_bus>>test_bus2;Exec1=$exec,test_bus
-	SubDemo2 SubDemo2 `gbus:"Exec2=test_bus2;Exec3"`
+	SubDemo  SubDemo  `gbus:"Exec1"` // Exec1=$?test_bus>>test_bus2,Exec1=$exec?test_bus
+	SubDemo2 SubDemo2 `gbus:"Exec2=test_bus2,Exec3"`
 }
 
 var _ gobus.EventHandler = (*SubDemo)(nil)

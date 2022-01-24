@@ -35,13 +35,13 @@ func SubscribeTag(bus Bus, data interface{}, verify bool, tag string) (func(), e
 		// Exe00=com.suisrc.topicA#groupA>>com.suisrc.topicB，不读取配置
 		// Exe11=, => Exe11=$[method]
 		// Exe21=$topics.exe11，读取配置文件
-		// Exe31=$topics.exe11,com.suisrc.topicA#groupA
+		// Exe31=$topics.exe11?com.suisrc.topicA#groupA
 		// Exe41=$,com.suisrc.topicA#groupA
 
 		all := tag[0] == '*'
 		cfs := make(map[string]string)
 		if !all {
-			for _, v := range strings.Split(tag, ";") {
+			for _, v := range strings.Split(tag, ",") {
 				if v == "" {
 					continue
 				}
@@ -68,7 +68,7 @@ func SubscribeTag(bus Bus, data interface{}, verify bool, tag string) (func(), e
 				}
 			} else if conf == "" || conf[0] != '$' {
 				topic = conf
-			} else if cs := strings.SplitN(conf[1:], ",", 2); cs[0] != "" {
+			} else if cs := strings.SplitN(conf[1:], "?", 2); cs[0] != "" {
 				topic = conf
 			} else {
 				topic = "$" + strings.ToLower(name) + conf[1:]
