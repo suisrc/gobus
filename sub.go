@@ -1,6 +1,7 @@
 package gobus
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -17,119 +18,21 @@ const (
 	BusOnceAsync             // value -> 3, 不支持group
 )
 
+// 配置主题列表， 在配置主题前需要声明该内容， 默认为空
+var (
+	Topics = make(map[string]string) // 系统初始化时候， 需要加载配置文件
+	ErrNon = fmt.Errorf("topic is empty")
+)
+
 type EventSubscriber interface {
 	Subscribe(Bus) (func(), error)
 }
-
-//=======================================================================================
 
 type EventHandler interface {
 	Subscribe() (kind Kind, topic string, handler interface{})
 }
 
-/**
- * 订阅模式
- * bus: 总线
- * hdl: 订阅的内容
- */
-func Subscribe(bus Bus, hdl EventHandler) (func(), error) {
-	kind, topic, handler := hdl.Subscribe()
-	switch kind {
-	case BusAsync:
-		if err := bus.SubscribeAsync(topic, handler); err != nil {
-			return nil, err
-		}
-	case BusOnceSync:
-		if err := bus.SubscribeOnce(topic, handler); err != nil {
-			return nil, err
-		}
-	case BusOnceAsync:
-		if err := bus.SubscribeOnceAsync(topic, handler); err != nil {
-			return nil, err
-		}
-	default:
-		if err := bus.Subscribe(topic, handler); err != nil {
-			return nil, err
-		}
-	}
-	return func() { bus.Unsubscribe(topic, handler) }, nil
-}
-
 //=======================================================================================
-
-type EventHandlerByGroup interface {
-	Subscribe() (kind Kind, topic, group string, handler interface{})
-}
-
-/**
- * 队列模式
- * bus: 总线
- * hdl: 订阅的内容
- */
-func SubscribeByGroup(bus Bus, hdl EventHandlerByGroup) (func(), error) {
-	kind, topic, group, handler := hdl.Subscribe()
-	switch kind {
-	case BusSync:
-		if err := bus.SubscribeByGroup(topic, group, handler); err != nil {
-			return nil, err
-		}
-	case BusAsync:
-		if err := bus.SubscribeAsyncByGroup(topic, group, handler); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("group is no suppert type: %v", kind)
-	}
-	return func() { bus.Unsubscribe(topic, handler) }, nil
-}
-
-//=======================================================================================
-
-/**
- *
- * bus: 总线
- * data: 订阅集合
- * verify: true: 发现错误，立即返回
- * excludes: 集合中排除的属性
- */
-func SubscribeBatch(bus Bus, data interface{}, verify bool, excludes ...string) (func(), error) {
-	sort.Strings(excludes)
-	clss := []func(){}
-	errs := []error{}
-	typ := reflect.TypeOf(data).Elem() // 指针
-	val := reflect.ValueOf(data).Elem()
-	for k := 0; k < typ.NumField(); k++ {
-		if idx := SearchStrings(&excludes, typ.Field(k).Name); idx >= 0 {
-			continue
-		}
-		var cls func()
-		var err error
-		switch value := val.Field(k).Interface().(type) {
-		case EventHandler:
-			cls, err = Subscribe(bus, value)
-		case EventHandlerByGroup:
-			cls, err = SubscribeByGroup(bus, value)
-		case EventSubscriber:
-			cls, err = value.Subscribe(bus)
-		}
-		if err != nil && verify {
-			return nil, err
-		} else if err != nil {
-			errs = append(errs, err)
-		} else if cls != nil {
-			clss = append(clss, cls)
-		}
-	}
-	clear := func() {
-		for _, opt := range clss {
-			opt()
-		}
-	}
-	if len(errs) > 0 {
-		return clear, NewMultiError(&errs)
-	}
-	return clear, nil
-}
 
 func SearchStrings(strs *[]string, str string) int {
 	if strs == nil || len(*strs) == 0 {
@@ -141,6 +44,58 @@ func SearchStrings(strs *[]string, str string) int {
 		return idx
 	}
 }
+
+func GetTopicName(topic string) (string, error) {
+	if topic == "" {
+		return "", nil
+	}
+	if topic[0] == '$' {
+		keys := strings.SplitN(topic[1:], ",", 2)
+		topic = ""
+		if keys[0] != "" {
+			topic = Topics[keys[0]]
+		}
+		if topic == "" && len(keys) == 2 { // 使用默认主题
+			topic = keys[1]
+		}
+	}
+	if topic == "" {
+		return "", ErrNon
+	}
+	return topic, nil
+}
+
+func FmtData2Byte(args interface{}) ([]byte, error) {
+	switch args := args.(type) {
+	case []byte:
+		return args, nil
+	case string:
+		return []byte(args), nil
+	default:
+		return json.Marshal(args)
+	}
+}
+
+func FmtByte2RefVal(t reflect.Type, data []byte) (reflect.Value, error) {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	switch t.String() {
+	case "[]uint8": // []byte
+		return reflect.ValueOf(data), nil
+	case "string":
+		return reflect.ValueOf(string(data)), nil
+	default:
+		s := reflect.New(t) // 对象直接使用json格式化
+		if err := json.Unmarshal(data, s.Interface()); err != nil {
+			return reflect.ValueOf(nil), err // 无法处理
+		}
+		return s, nil
+	}
+
+}
+
+//=======================================================================================
 
 func NewMultiError(errs *[]error) *MultiError {
 	return &MultiError{

@@ -13,6 +13,50 @@ import (
 	"github.com/suisrc/gobus/natsbus"
 )
 
+// topic => topicA#groupA>>topicB;, 从主题A订阅转发到主题B, 异步订阅专用
+// Once订阅只支持无分组订阅, 同步订阅不支持转发
+//
+// 1.没有返回值， 异步订阅
+// 2.有返回值，并且订阅包含=>异步订阅
+// 3.否则同步订阅
+// 4.单次订阅不指定标签注入
+// 5.标签注入默认场景下全部是异步订阅，以防止未配置导致外部总线的破坏
+type Inject struct {
+	Bus      gobus.Bus
+	SubDemo  SubDemo  `gbus:"Exec1"` // Exec1=$,test_bus>>test_bus2;Exec1=$exec,test_bus
+	SubDemo2 SubDemo2 `gbus:"Exec2=test_bus2;Exec3"`
+}
+
+var _ gobus.EventHandler = (*SubDemo)(nil)
+
+type SubDemo struct {
+}
+
+func (s SubDemo) Subscribe() (kind gobus.Kind, topic string, handler interface{}) {
+	return gobus.BusSync, "test_bus", s.Exec1
+}
+
+func (SubDemo) Exec1(msg string) (string, error) {
+	return msg + "gobus", nil
+}
+
+type SubDemo2 struct {
+}
+
+func (s SubDemo2) Subscribe() (kind gobus.Kind, topic string, handler interface{}) {
+	return gobus.BusAsync, "test_bus", s.Exec2
+}
+
+func (SubDemo2) Exec2(msg string) {
+	fmt.Println(msg + " exec2")
+}
+
+func (SubDemo2) Exec3(msg string) {
+	fmt.Println(msg + " exec3")
+}
+
+//=================================================================================================
+
 func TestBus(t *testing.T) {
 	// Setup nats server
 	s := gnatsd.RunDefaultServer()
@@ -28,43 +72,39 @@ func TestBus(t *testing.T) {
 		SubDemo2{},
 	}
 
-	gobus.SubscribeBatch(bus, &inj, false, "Bus")
-
+	gobus.SubscribeBatch(bus, inj, false, "Bus")
 	bus.Publish("test_bus", "helloword")
 
-	res, _ := bus.RequestB("test_bus", 2*time.Second, "hello, go")
+	res, _ := bus.RequestB("test_bus", 2*time.Second, "hello, ")
 	fmt.Println(string(res))
 	assert.NotNil(t, nil)
 }
 
-type Inject struct {
-	Bus      gobus.Bus
-	SubDemo  SubDemo
-	SubDemo2 SubDemo2
-}
+func TestBusTag(t *testing.T) {
+	// Setup nats server
+	s := gnatsd.RunDefaultServer()
+	defer s.Shutdown()
 
-var _ gobus.EventHandler = (*SubDemo)(nil)
+	endpoint := fmt.Sprintf("nats://localhost:%d", nats.DefaultPort)
+	nc, _ := nats.Connect(endpoint)
 
-type SubDemo struct {
-}
+	bus := natsbus.New(nc)
+	inj := Inject{
+		bus,
+		SubDemo{},
+		SubDemo2{},
+	}
 
-func (s SubDemo) Subscribe() (kind gobus.Kind, topic string, handler interface{}) {
-	return gobus.BusSync, "test_bus", s.exec1
-}
+	gobus.Topics = map[string]string{
+		"exec":  "test_bus#T123>>test_bus2",
+		"exec1": "test_bus#T123",
+		"exec3": "test_bus#T123",
+	}
+	gobus.SubscribeTag(bus, inj, false, "")
 
-func (*SubDemo) exec1(msg string) (string, error) {
-	return "hello, gobus", nil
-}
-
-type SubDemo2 struct {
-}
-
-func (s SubDemo2) Subscribe() (kind gobus.Kind, topic string, handler interface{}) {
-	return gobus.BusAsync, "test_bus", s.exec2
-}
-
-func (*SubDemo2) exec2(msg string) {
-	fmt.Println(msg)
+	res, _ := bus.RequestB("test_bus", 2*time.Second, "hello ,")
+	fmt.Println(string(res))
+	assert.NotNil(t, nil)
 }
 
 //=================================================================================================

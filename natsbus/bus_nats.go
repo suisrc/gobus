@@ -1,9 +1,12 @@
 package natsbus
 
+// 抽象出适配器方式， 所以推荐使用NewBus方式
+
 import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,18 +22,19 @@ type NatsBus struct {
 }
 
 type busHandler struct {
-	call     reflect.Value
-	sub      *nats.Subscription
 	topic    string
 	group    string
+	forward  string
 	async    bool
 	flagOnce bool
+	call     reflect.Value
+	sub      *nats.Subscription
 }
 
 var _ gobus.Bus = (*NatsBus)(nil)
 
 // New returns new QueueBus with empty handlers.
-func New(nc *nats.Conn) gobus.Bus {
+func NewNatsBus(nc *nats.Conn) gobus.Bus {
 	b := &NatsBus{
 		nc,
 		make(map[string][]*busHandler),
@@ -95,17 +99,33 @@ func (bus *NatsBus) findHandlerIdx(topic string, callback reflect.Value) int {
 //=================================================================================================
 //=================================================================================================
 
-// func (?) (result, (error))
+// func (?) (result, (error))， 注意订阅中包含 ">>" 是异步订阅
 func (bus *NatsBus) Subscribe(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn)}); err != nil {
+	if topic, group, forward, async, err := bus.parseTopic(topic, fn); err != nil {
+		return err
+	} else if err := bus.doSubscribe(&busHandler{
+		topic:   topic,
+		group:   group,
+		forward: forward,
+		async:   async,
+		call:    reflect.ValueOf(fn),
+	}); err != nil {
 		return err
 	}
 	return nil
 }
 
-// func (?)
+// func (?) (result, (error))， 异步订阅忽略 ">>"，即无论任何情况下都是异步订阅
 func (bus *NatsBus) SubscribeAsync(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), async: true}); err != nil {
+	if topic, group, forward, _, err := bus.parseTopic(topic, fn); err != nil {
+		return err
+	} else if err := bus.doSubscribe(&busHandler{
+		topic:   topic,
+		group:   group,
+		forward: forward,
+		async:   true,
+		call:    reflect.ValueOf(fn),
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -113,37 +133,68 @@ func (bus *NatsBus) SubscribeAsync(topic string, fn interface{}) error {
 
 // func (?) (result, (error))
 func (bus *NatsBus) SubscribeOnce(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), flagOnce: true}); err != nil {
+	if topic, group, forward, async, err := bus.parseTopic(topic, fn); err != nil {
 		return err
-	}
-	return nil
-}
-
-// func (?)
-func (bus *NatsBus) SubscribeOnceAsync(topic string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), async: true, flagOnce: true}); err != nil {
+	} else if err := bus.doSubscribe(&busHandler{
+		topic:    topic,
+		group:    group,
+		forward:  forward,
+		async:    async,
+		call:     reflect.ValueOf(fn),
+		flagOnce: true,
+	}); err != nil {
 		return err
 	}
 	return nil
 }
 
 // func (?) (result, (error))
-func (bus *NatsBus) SubscribeByGroup(topic, group string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), group: group}); err != nil {
+func (bus *NatsBus) SubscribeOnceAsync(topic string, fn interface{}) error {
+	if topic, group, forward, _, err := bus.parseTopic(topic, fn); err != nil {
 		return err
-	}
-	return nil
-}
-
-// func (?)
-func (bus *NatsBus) SubscribeAsyncByGroup(topic, group string, fn interface{}) error {
-	if err := bus.doSubscribe(&busHandler{topic: topic, call: reflect.ValueOf(fn), group: group, async: true}); err != nil {
+	} else if err := bus.doSubscribe(&busHandler{
+		topic:    topic,
+		group:    group,
+		forward:  forward,
+		async:    true,
+		call:     reflect.ValueOf(fn),
+		flagOnce: true,
+	}); err != nil {
 		return err
 	}
 	return nil
 }
 
 //=================================================================================================
+
+// topicA/groupA>>topicB
+// 1.没有返回值的是异步订阅
+// 2.订阅主题中包含 ">>" 是异步订阅
+// 3.有返回值且主题中没有 ">>" 是同步订阅
+func (bus *NatsBus) parseTopic(topic0 string, fn interface{}) (topic, group, forward string, async bool, err error) {
+	topic0, err = gobus.GetTopicName(topic0)
+	if err != nil {
+		return // 配置无订阅， 跳过
+	}
+	if topic0 == "" {
+		err = fmt.Errorf("[%v]订阅主题为空", fn)
+		return // 无法订阅， 主题为空
+	}
+	topics := strings.SplitN(topic0, ">>", 2)
+	if len(topics) == 2 {
+		async = true // 包含">>"值, 异步订阅
+		forward = strings.TrimSpace(topics[1])
+	}
+	topic2 := strings.SplitN(topics[0], "/", 2)
+	if len(topic2) == 2 {
+		group = strings.TrimSpace(topic2[1])
+	}
+	topic = strings.TrimSpace(topic2[0])
+	if !async && reflect.ValueOf(fn).Type().NumOut() == 0 {
+		async = true // 没有返回值， 异步订阅
+	}
+	return
+}
 
 // doSubscribe handles the subscription logic and is utilized by the public Subscribe functions
 func (bus *NatsBus) doSubscribe(hdl *busHandler) error {
@@ -187,22 +238,28 @@ func (bus *NatsBus) doHook(hdl *busHandler, msg *nats.Msg) {
 	}
 	// 执行调用, 处理结果
 	if refv := hdl.call.Call(in); !hdl.async && msg.Reply != "" && len(refv) > 0 {
-		var value interface{}
-		reply := false
-		// func (?) (result, error)
-		if len(refv) > 1 && refv[1].Interface() != nil {
-			value, reply = refv[1].Interface(), true
-		} else if len(refv) > 0 && refv[0].Interface() != nil {
-			value, reply = refv[0].Interface(), true
-		}
-		if reply { // 有结果需要返回
-			if data, err := FmtData2Byte(value); err == nil {
-				bus.nc.Publish(msg.Reply, data) // 返回数据
-			}
-		}
+		bus.doReply(refv, msg.Reply)
+	} else if hdl.async && hdl.forward != "" && len(refv) > 0 {
+		bus.doReply(refv, hdl.forward)
 	}
 	if hdl.flagOnce { // 注销订阅
 		bus.unsubscribe(hdl.topic, hdl.call)
+	}
+}
+
+func (bus *NatsBus) doReply(refv []reflect.Value, topic string) {
+	var value interface{}
+	reply := false
+	// func (?) (result, error) error优先返回
+	if len(refv) > 1 && refv[1].Interface() != nil {
+		value, reply = refv[1].Interface(), true
+	} else if len(refv) > 0 && refv[0].Interface() != nil {
+		value, reply = refv[0].Interface(), true
+	}
+	if reply { // 有结果需要返回
+		if data, err := FmtData2Byte(value); err == nil {
+			bus.nc.Publish(topic, data) // 返回数据
+		}
 	}
 }
 
