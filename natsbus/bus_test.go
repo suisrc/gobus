@@ -26,7 +26,7 @@ import (
 type Inject struct {
 	Bus      gobus.Bus
 	SubDemo  SubDemo  `gbus:"Exec1"` // Exec1=$?test_bus>>test_bus2,Exec1=$exec?test_bus
-	SubDemo2 SubDemo2 `gbus:"Exec2=test_bus2,Exec3"`
+	SubDemo2 SubDemo2 `gbus:"Exec2=test_bus2,Exec4"`
 }
 
 var _ gobus.EventHandler = (*SubDemo)(nil)
@@ -102,7 +102,8 @@ func TestBusTag(t *testing.T) {
 		"exec1": "test_bus#T123",
 		"exec3": "test_bus#T123",
 	}
-	gobus.SubscribeTag(bus, inj, false, "")
+	_, err := gobus.SubscribeTag(bus, inj, false, "")
+	assert.Nil(t, err)
 
 	res, _ := bus.RequestB("test_bus", 2*time.Second, "hello ,")
 	fmt.Println(string(res))

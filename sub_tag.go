@@ -58,6 +58,11 @@ func SubscribeTag(bus Bus, data interface{}, verify bool, tag string) (func(), e
 		for name, conf := range cfs {
 			_, exsit := tft.MethodByName(name)
 			if !exsit {
+				err := fmt.Errorf("[%s] struct config tags method [%s] not found", tft.Name(), name)
+				if verify {
+					return nil, err
+				}
+				errs = append(errs, err)
 				continue // 方法不存在跳过
 			}
 			topic := ""
